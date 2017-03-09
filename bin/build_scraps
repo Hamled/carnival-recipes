@@ -1,0 +1,106 @@
+#!/usr/bin/env ruby
+
+def parse_recipe(file)
+  lines = file.readlines.map(&:chomp)
+  recipe = lines.drop(3) # Remove header
+
+  # Parse the metadata
+  time, servings, _, *recipe = recipe
+
+  # Parse the ingredients
+  ingredients = recipe.take_while { |l| !l.empty? }
+
+  # The rest of the recipe is directions
+  directions = recipe.drop(ingredients.length + 1)
+
+  return {
+    time: [time],
+    servings: [servings],
+    ingredients: ingredients,
+    directions: directions
+  }
+end
+
+DUP_CHANCES = {
+  time: 0.2,
+  servings: 0.2,
+  ingredients: 0.1,
+  directions: 0.15
+}
+
+def duplicate_lines(recipe)
+  return recipe.map do |section, lines|
+    chance = DUP_CHANCES[section]
+    [section, lines.flat_map {|l| rand < chance ? [l,l] : l}]
+  end.to_h
+end
+
+def build_scraps(recipe, n)
+  recipe = recipe.dup
+
+  # Split the ingredients and directions evenly
+  scraps = group_randomly(recipe[:ingredients], n)
+           .zip(group_randomly(recipe[:directions], n)
+                .map{|dirs| [""] + dirs})
+           .map(&:flatten)
+
+  # Add the time and servings lines to random scraps
+  (recipe[:servings] + recipe[:time]).each do |line|
+    scraps[rand(scraps.length)].unshift(line, "")
+  end
+
+  scraps
+end
+
+# This splits a sequence of elements into n groups randomly
+# the order of elements is maintained within each group
+# e.g. [1,2,3,4,5,6] could split into [3,5], [1,4], [2,6]
+def group_randomly(seq, n)
+  rand_seq = Array(0...seq.length).shuffle
+
+  per_group = seq.length / n
+  remainder = seq.length % n
+
+  Array.new(n) do |group|
+    # We're in the remainder section if seq doesn't have
+    # enough elements left to make full groups
+    rand_seq.shift(per_group + (group < remainder ? 1 : 0))
+  end.map do |group|
+    group.sort.map{|i| seq[i]}
+  end
+end
+
+NUM_SCRAPS = 6
+
+def main
+  if ARGV.length < 1
+    puts "Usage: build_scraps <recipe file> [recipe file ...]"
+    exit 1
+  end
+
+  ARGV.each do |filename|
+    print "Building #{NUM_SCRAPS} scraps for recipe #{filename}..."
+
+    begin
+      recipe = parse_recipe(File.open(filename, "r"))
+      recipe = duplicate_lines(recipe)
+      scraps = build_scraps(recipe, NUM_SCRAPS)
+
+      recipe_name = File.basename(filename, File.extname(filename))
+      scraps.each.with_index do |scrap, i|
+        f = File.open("#{recipe_name}-scrap#{i+1}.txt", "w")
+        scrap.each do |line|
+          f.write(line + "\n")
+        end
+        f.close
+      end
+    rescue
+      puts " failed:"
+      raise
+    else
+      puts " done."
+    end
+  end
+end
+
+main
